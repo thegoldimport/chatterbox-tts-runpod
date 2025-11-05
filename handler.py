@@ -1,12 +1,13 @@
 import runpod
-import torch
-import torchaudio
+import torchaudio as ta
 import base64
 import io
-from chatterbox import ChatterBox
 
 print("Loading Chatterbox TTS model...")
-model = ChatterBox()
+from chatterbox.tts import ChatterboxTTS
+
+# Initialize model (first run downloads it)
+model = ChatterboxTTS.from_pretrained(device="cuda")
 
 # In-memory voice storage
 voice_clones = {}
@@ -51,7 +52,7 @@ def generate_audio(input_data):
 
     print(f"Generating audio for: {text[:50]}...")
     
-    # Get the reference audio
+    # Decode reference audio
     reference_audio_base64 = voice_clones[voice_clone_id]["audio_base64"]
     reference_audio_bytes = base64.b64decode(reference_audio_base64)
     
@@ -60,30 +61,26 @@ def generate_audio(input_data):
     with open(ref_path, "wb") as f:
         f.write(reference_audio_bytes)
     
-    # Generate NEW audio with Chatterbox using the cloned voice
+    # Generate speech with Chatterbox
+    wav = model.generate(text, audio_prompt_path=ref_path)
+    
+    # Save generated audio
     output_path = f"/tmp/output_{voice_clone_id}.wav"
+    ta.save(output_path, wav, model.sr)
     
-    # Use Chatterbox to generate speech
-    model.generate(
-        text=text,
-        reference_audio=ref_path,
-        output_file=output_path
-    )
-    
-    # Read the GENERATED audio (not the reference!)
+    # Read generated audio and encode to base64
     with open(output_path, "rb") as f:
         generated_audio_bytes = f.read()
     
     generated_audio_base64 = base64.b64encode(generated_audio_bytes).decode('utf-8')
     
-    # Get audio duration
-    waveform, sample_rate = torchaudio.load(output_path)
-    duration = waveform.shape[1] / sample_rate
+    # Calculate duration
+    duration = wav.shape[-1] / model.sr
     
     return {
-        "audio_base64": generated_audio_base64,  # Return GENERATED audio
+        "audio_base64": generated_audio_base64,
         "duration": round(duration, 2),
-        "text": text,  # Return text for validation
+        "text": text,
         "status": "success"
     }
 
