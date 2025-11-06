@@ -11,24 +11,41 @@ from chatterbox.tts import ChatterboxTTS
 # Initialize model (first run downloads it)
 model = ChatterboxTTS.from_pretrained(device="cuda")
 
-# Persistent voice storage directory
+# Persistent voice storage directory (NETWORK STORAGE - shared across all serverless workers)
+# RunPod serverless auto-mounts network volumes at /runpod-volume
 VOICE_STORAGE_DIR = "/runpod-volume/voice_clones"
 os.makedirs(VOICE_STORAGE_DIR, exist_ok=True)
+
+print(f"[Handler] Voice storage directory: {VOICE_STORAGE_DIR}")
+print(f"[Handler] Directory exists: {os.path.exists(VOICE_STORAGE_DIR)}")
 
 def save_voice_clone(clone_id, voice_data):
     """Save voice clone to persistent storage"""
     clone_path = os.path.join(VOICE_STORAGE_DIR, f"{clone_id}.json")
     with open(clone_path, "w") as f:
         json.dump(voice_data, f)
-    print(f"Saved voice clone: {clone_id}")
+    print(f"[Handler] Saved voice clone: {clone_id} to {clone_path}")
+    print(f"[Handler] File exists after save: {os.path.exists(clone_path)}")
 
 def load_voice_clone(clone_id):
     """Load voice clone from persistent storage"""
     clone_path = os.path.join(VOICE_STORAGE_DIR, f"{clone_id}.json")
+    print(f"[Handler] Looking for voice clone at: {clone_path}")
+    print(f"[Handler] File exists: {os.path.exists(clone_path)}")
+    
     if not os.path.exists(clone_path):
+        # List all files for debugging
+        try:
+            all_files = os.listdir(VOICE_STORAGE_DIR)
+            print(f"[Handler] Available voice clones: {all_files}")
+        except Exception as e:
+            print(f"[Handler] Error listing directory: {e}")
         return None
+    
     with open(clone_path, "r") as f:
-        return json.load(f)
+        data = json.load(f)
+    print(f"[Handler] Successfully loaded voice clone: {clone_id}")
+    return data
 
 def handler(event):
     try:
@@ -67,7 +84,7 @@ def clone_voice(input_data):
         # Save to persistent storage
         save_voice_clone(clone_id, voice_data)
 
-        print(f"Voice cloned successfully: {clone_id}")
+        print(f"[Handler] Voice cloned successfully: {clone_id}")
         return {
             "clone_id": clone_id,
             "voice_name": voice_name,
@@ -92,9 +109,6 @@ def generate_audio(input_data):
         if voice_data is None:
             error_msg = f"Voice clone not found: {voice_clone_id}"
             print(f"[Error] {error_msg}")
-            # List available clones for debugging
-            available_clones = [f.replace('.json', '') for f in os.listdir(VOICE_STORAGE_DIR) if f.endswith('.json')]
-            print(f"[Debug] Available clones: {available_clones}")
             return {"error": error_msg}
 
         print(f"[Generate] Generating audio for: {text[:50]}...")
