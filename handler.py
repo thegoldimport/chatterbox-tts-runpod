@@ -4,6 +4,7 @@ import base64
 import io
 import os
 import json
+import subprocess
 
 print("Loading Chatterbox TTS model...")
 from chatterbox.tts import ChatterboxTTS
@@ -18,6 +19,41 @@ os.makedirs(VOICE_STORAGE_DIR, exist_ok=True)
 
 print(f"[Handler] Voice storage directory: {VOICE_STORAGE_DIR}")
 print(f"[Handler] Directory exists: {os.path.exists(VOICE_STORAGE_DIR)}")
+
+def convert_to_wav(input_bytes, output_path):
+    """Convert any audio format to WAV using ffmpeg"""
+    try:
+        # Save input bytes to temp file
+        temp_input = f"/tmp/input_{os.urandom(4).hex()}"
+        with open(temp_input, "wb") as f:
+            f.write(input_bytes)
+        
+        # Convert to WAV using ffmpeg
+        cmd = [
+            "ffmpeg",
+            "-i", temp_input,
+            "-acodec", "pcm_s16le",  # PCM 16-bit
+            "-ar", "24000",  # 24kHz sample rate (Chatterbox default)
+            "-ac", "1",  # Mono
+            "-y",  # Overwrite output
+            output_path
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        # Clean up temp input
+        if os.path.exists(temp_input):
+            os.remove(temp_input)
+        
+        if result.returncode != 0:
+            print(f"[Handler] ffmpeg error: {result.stderr}")
+            raise Exception(f"Audio conversion failed: {result.stderr}")
+        
+        print(f"[Handler] Successfully converted audio to WAV: {output_path}")
+        return True
+    except Exception as e:
+        print(f"[Handler] Audio conversion error: {e}")
+        raise
 
 def save_voice_clone(clone_id, voice_data):
     """Save voice clone to persistent storage"""
@@ -117,10 +153,9 @@ def generate_audio(input_data):
         reference_audio_base64 = voice_data["audio_base64"]
         reference_audio_bytes = base64.b64decode(reference_audio_base64)
         
-        # Save reference audio to temp file
+        # Convert to WAV format (handles MP3/M4A/WAV input)
         ref_path = f"/tmp/ref_{voice_clone_id}.wav"
-        with open(ref_path, "wb") as f:
-            f.write(reference_audio_bytes)
+        convert_to_wav(reference_audio_bytes, ref_path)
         
         print(f"[Generate] Running Chatterbox TTS...")
         # Generate speech with Chatterbox
@@ -138,6 +173,12 @@ def generate_audio(input_data):
         
         # Calculate duration
         duration = wav.shape[-1] / model.sr
+        
+        # Clean up temp files
+        if os.path.exists(ref_path):
+            os.remove(ref_path)
+        if os.path.exists(output_path):
+            os.remove(output_path)
         
         print(f"[Generate] Success! Duration: {duration:.2f}s, Audio size: {len(generated_audio_base64)} chars")
         
